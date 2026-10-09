@@ -283,3 +283,15 @@ label.field > span { display: block; font-size: 13px; color: var(--text-2); marg
 .toast.show { opacity: 1; transform: translate(-50%, 0); }
 
 .sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+
+/* Google Calendar */
+.gcal-dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; background: var(--good); margin-right: 6px; vertical-align: 1px; flex-shrink: 0; }
+.block-meta { display: block; font-size: 12px; font-weight: 400; color: var(--text-3); margin-top: 1px; }
+.block-item.from-google .block-label { color: var(--text-2); }
+.block-item.from-google { min-height: 64px; }
+.block-item.current .block-meta { color: var(--accent); opacity: .8; }
+.all-day { margin: 0 0 6px; font-size: 13px; color: var(--text-2); }
+.setup-steps { padding-left: 20px; margin: 10px 0; color: var(--text-2); }
+.setup-steps li + li { margin-top: 10px; }
+.setup-steps strong { color: var(--text); }
+input[type="url"] { width: 100%; background: var(--surface-2); border: 1px solid transparent; border-radius: 10px; padding: 10px 12px; font-size: 16px; min-height: 44px; }

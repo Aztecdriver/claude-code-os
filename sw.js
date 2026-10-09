@@ -1,5 +1,5 @@
 // Bump CACHE when shipping changes so phones pick up the new files.
-const CACHE = 'steady-v1';
+const CACHE = 'steady-v2';
 const SHELL = ['./', 'index.html', 'app.css', 'app.js', 'manifest.webmanifest', 'icons/icon.svg', 'icons/apple-touch-icon.png'];
 
 self.addEventListener('install', (e) => {
