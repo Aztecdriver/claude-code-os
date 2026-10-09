@@ -15,6 +15,8 @@ const DEFAULT_STATE = {
   sessions: [],
   timer: null,
   setup: {},
+  gcal: { url: '', key: '', calendar: '', lastSync: 0, error: '' },
+  gcalEvents: {},
 };
 
 function loadState() {
@@ -122,8 +124,17 @@ function render() {
 
 function currentBlock() {
   const t = nowMinutes();
-  const blocks = peekDay(dateKey())?.blocks || [];
-  return blocks.find((b) => toMinutes(b.start) <= t && t < toMinutes(b.end)) || null;
+  return timelineFor(dateKey()).find((b) => toMinutes(b.start) <= t && t < toMinutes(b.end)) || null;
+}
+
+// Steady blocks plus timed Google events for a day, sorted. Events Steady pushed itself are skipped.
+function timelineFor(key) {
+  const blocks = peekDay(key)?.blocks || [];
+  const pushed = new Set(blocks.map((b) => b.gcalId).filter(Boolean));
+  const events = (state.gcalEvents[key] || [])
+    .filter((e) => !e.allDay && !pushed.has(e.id))
+    .map((e) => ({ ...e, label: e.title, fromGoogle: true }));
+  return [...blocks, ...events].sort((a, b) => a.start.localeCompare(b.start) || a.end.localeCompare(b.end));
 }
 
 function renderNowChip() {
@@ -146,6 +157,10 @@ function renderToday(view) {
   const d = day(key);
   const t = nowMinutes();
   const blocks = [...d.blocks].sort((a, b) => a.start.localeCompare(b.start));
+  const timeline = timelineFor(key);
+  const allDay = (state.gcalEvents[key] || []).filter((e) => e.allDay);
+  const connected = gcalConnected();
+  const unpushed = connected ? d.blocks.filter((b) => !b.gcalId && toMinutes(b.end) > t).length : 0;
   const yesterday = peekDay(addDays(key, -1));
   const canCopy = !d.blocks.length && yesterday?.blocks?.length;
   const openTasks = d.tasks.filter((x) => !x.done).length;
@@ -159,18 +174,26 @@ function renderToday(view) {
 
     <h2>Plan</h2>
     <div class="card">
+      ${allDay.length ? `<p class="all-day"><span class="gcal-dot" aria-hidden="true"></span>All day: ${allDay.map((e) => esc(e.title)).join(' · ')}</p>` : ''}
       <div id="blocks">
-        ${blocks.length ? blocks.map((b) => {
+        ${timeline.length ? timeline.map((b) => {
           const s = toMinutes(b.start), e = toMinutes(b.end);
           const cls = t >= e ? 'past' : (t >= s ? 'current' : '');
+          if (b.fromGoogle) {
+            return `<div class="block-item from-google ${cls}">
+              <span class="block-time">${b.start}–${b.end}</span>
+              <span class="block-label">${esc(b.label)}<span class="block-meta"><span class="gcal-dot" aria-hidden="true"></span>${esc(b.calendar)}</span></span>
+            </div>`;
+          }
           return `<div class="block-item ${cls}">
             <span class="block-time">${b.start}–${b.end}</span>
-            <span class="block-label">${esc(b.label)}</span>
+            <span class="block-label">${esc(b.label)}${b.gcalId ? `<span class="block-meta">✓ in Google Calendar</span>` : ''}</span>
             <button class="icon-btn" data-del-block="${b.id}" aria-label="Remove ${esc(b.label)}">×</button>
           </div>`;
         }).join('') : `<p class="empty">Block out your day. Time you don’t plan tends to go to your phone.</p>`}
       </div>
       ${canCopy ? `<button class="btn ghost" id="copy-plan">Copy yesterday’s plan</button>` : ''}
+      ${unpushed ? `<button class="btn ghost" id="push-plan">Send ${unpushed} block${unpushed > 1 ? 's' : ''} to Google Calendar</button>` : ''}
       <form id="block-form" style="margin-top:10px">
         <div class="grid-2">
           <label class="field"><span>Start</span><input type="time" name="start" required value="${suggestStart(blocks)}"></label>
@@ -199,6 +222,16 @@ function renderToday(view) {
         <button class="btn primary" type="submit">Add</button>
       </form>
     </div>
+
+    <h2>Google Calendar</h2>
+    ${connected ? `
+      <div class="card">
+        <div class="row">
+          <span class="grow small">${state.gcal.error ? `<span class="flag">${esc(state.gcal.error)}</span>` : `Connected${state.gcal.calendar ? ` to <strong>${esc(state.gcal.calendar)}</strong>` : ''}${state.gcal.lastSync ? ` · synced ${timeAgo(state.gcal.lastSync)}` : ''}`}</span>
+          <button class="btn" id="gcal-sync">Sync</button>
+        </div>
+        <button class="btn ghost" id="gcal-disconnect" style="margin-top:6px;padding:0">Disconnect</button>
+      </div>` : gcalSetupCard()}
   `;
 
   $('#intention').addEventListener('change', (e) => { d.intention = e.target.value.trim(); save(); });
@@ -214,7 +247,7 @@ function renderToday(view) {
   });
 
   $('#copy-plan')?.addEventListener('click', () => {
-    d.blocks = yesterday.blocks.map((b) => ({ ...b, id: uid() }));
+    d.blocks = yesterday.blocks.map(({ gcalId, ...b }) => ({ ...b, id: uid() }));
     save(); render(); toast('Copied yesterday’s plan');
   });
 
@@ -228,8 +261,26 @@ function renderToday(view) {
   });
 
   view.querySelectorAll('[data-del-block]').forEach((b) => b.addEventListener('click', () => {
-    d.blocks = d.blocks.filter((x) => x.id !== b.dataset.delBlock); save(); render();
+    const gone = d.blocks.find((x) => x.id === b.dataset.delBlock);
+    d.blocks = d.blocks.filter((x) => x !== gone); save(); render();
+    if (gone?.gcalId && gcalConnected()) {
+      gcalRequest({ action: 'delete', id: gone.gcalId })
+        .then(() => toast('Removed from Google Calendar'))
+        .catch(() => toast('Couldn’t remove it from Google Calendar. Delete it there.'));
+    }
   }));
+  $('#push-plan')?.addEventListener('click', (e) => pushPlan(key, e.target));
+  $('#gcal-sync')?.addEventListener('click', (e) => {
+    e.target.disabled = true;
+    gcalSync(true).finally(() => render());
+  });
+  $('#gcal-disconnect')?.addEventListener('click', () => {
+    if (!confirm('Disconnect Google Calendar? Your Google events stay where they are.')) return;
+    state.gcal = { ...DEFAULT_STATE.gcal };
+    state.gcalEvents = {};
+    save(); render();
+  });
+  wireGcalSetup(view);
   view.querySelectorAll('[data-toggle-task]').forEach((b) => b.addEventListener('change', () => {
     const task = d.tasks.find((x) => x.id === b.dataset.toggleTask);
     task.done = b.checked; save(); render();
@@ -252,6 +303,207 @@ function suggestStart(blocks) {
   if (blocks.length) return blocks[blocks.length - 1].end;
   const t = Math.ceil((nowMinutes() + 1) / 30) * 30;
   return t >= 24 * 60 ? '09:00' : `${pad(Math.floor(t / 60))}:${pad(t % 60)}`;
+}
+
+/* ---------- Google Calendar ---------- */
+
+// Steady talks to a small Apps Script web app (google-calendar/Code.gs) that the
+// user deploys in their own Google account. The script checks a random key that
+// Steady generates and embeds in the copy of the script it hands out.
+
+const SYNC_EVERY_MS = 5 * 60000;
+let gcalScript = null;
+let gcalSyncing = null;
+
+function gcalConnected() {
+  return Boolean(state.gcal.url && state.gcal.key);
+}
+
+function timeAgo(ts) {
+  const min = Math.round((Date.now() - ts) / 60000);
+  if (min < 1) return 'just now';
+  if (min < 60) return `${min} min ago`;
+  return `${fmtDuration(min)} ago`;
+}
+
+async function gcalRequest(params, base = state.gcal) {
+  const qs = new URLSearchParams({ ...params, key: base.key });
+  const ctrl = new AbortController();
+  const timer = setTimeout(() => ctrl.abort(), 20000);
+  try {
+    const res = await fetch(`${base.url}?${qs}`, { signal: ctrl.signal });
+    const text = await res.text();
+    let data;
+    try { data = JSON.parse(text); } catch {
+      throw new Error('The script didn’t answer. Check it’s deployed with access “Anyone”.');
+    }
+    if (data.error) throw new Error(data.error);
+    return data;
+  } catch (err) {
+    if (err.name === 'AbortError') throw new Error('Google took too long to answer.');
+    if (err instanceof TypeError) throw new Error('Couldn’t reach Google. Check the URL and your connection.');
+    throw err;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+function localIso(key, hhmm) {
+  const [y, m, d] = key.split('-').map(Number);
+  const [h, min] = hhmm.split(':').map(Number);
+  return new Date(y, m - 1, d, h, min).toISOString();
+}
+
+function toLocalHHMM(iso, key) {
+  const d = new Date(iso);
+  const k = dateKey(d);
+  if (k < key) return '00:00';
+  if (k > key) return '23:59';
+  return `${pad(d.getHours())}:${pad(d.getMinutes())}`;
+}
+
+async function gcalFetchDay(key) {
+  const { events } = await gcalRequest({ action: 'events', start: localIso(key, '00:00'), end: localIso(addDays(key, 1), '00:00') });
+  state.gcalEvents[key] = events
+    .filter((e) => !e.allDay || (e.startDate <= key && key < e.endDate))
+    .map((e) => e.allDay
+      ? { id: e.id, title: e.title, calendar: e.calendar, allDay: true }
+      : { id: e.id, title: e.title, calendar: e.calendar, allDay: false, start: toLocalHHMM(e.start, key), end: toLocalHHMM(e.end, key) })
+    .filter((e) => e.allDay || e.start < e.end);
+}
+
+function gcalSync(force = false) {
+  if (!gcalConnected()) return Promise.resolve();
+  if (!force && Date.now() - state.gcal.lastSync < SYNC_EVERY_MS) return Promise.resolve();
+  if (gcalSyncing) return gcalSyncing;
+  const key = dateKey();
+  gcalSyncing = gcalFetchDay(key)
+    .then(() => {
+      // Keep only the last couple of days of cached events.
+      Object.keys(state.gcalEvents).forEach((k) => { if (k < addDays(key, -1)) delete state.gcalEvents[k]; });
+      state.gcal.lastSync = Date.now();
+      state.gcal.error = '';
+    })
+    .catch((err) => { state.gcal.error = err.message; })
+    .finally(() => {
+      gcalSyncing = null;
+      save();
+      if (currentTab === 'today') render(); else renderNowChip();
+    });
+  return gcalSyncing;
+}
+
+async function pushPlan(key, button) {
+  const d = day(key);
+  const t = nowMinutes();
+  const todo = d.blocks.filter((b) => !b.gcalId && toMinutes(b.end) > t);
+  button.disabled = true;
+  button.textContent = 'Sending…';
+  let sent = 0;
+  for (const b of todo) {
+    try {
+      const { id } = await gcalRequest({ action: 'create', title: b.label, start: localIso(key, b.start), end: localIso(key, b.end) });
+      b.gcalId = id;
+      sent++;
+      save();
+    } catch (err) {
+      toast(err.message);
+      break;
+    }
+  }
+  if (sent) toast(`Sent ${sent} block${sent > 1 ? 's' : ''} to Google Calendar`);
+  render();
+}
+
+function gcalSetupCard() {
+  return `
+    <div class="card">
+      <p class="small muted" style="margin-top:0">See your meetings in your plan, and send your plan to Google Calendar. Steady connects through a small script that runs in your own Google account. Setup takes about three minutes, and a computer makes it easier.</p>
+      <ol class="setup-steps small">
+        <li>Copy the setup script. It includes a private key made just for you.
+          <div class="grid-2" style="margin-top:8px">
+            <button class="btn" id="gcal-copy" type="button">Copy script</button>
+            <button class="btn" id="gcal-share" type="button">Send to myself</button>
+          </div>
+        </li>
+        <li>Go to <strong>script.google.com</strong> → New project. Delete what’s there and paste the script.</li>
+        <li>Click <strong>Deploy → New deployment</strong>. Under the gear, choose <strong>Web app</strong>. Set Execute as: <strong>Me</strong>, Who has access: <strong>Anyone</strong>. Click Deploy.</li>
+        <li>Google will ask you to authorize. If it says the app isn’t verified, that’s your own script. Click Advanced → Go to project.</li>
+        <li>Copy the <strong>Web app URL</strong> and paste it here:
+          <form id="gcal-form" class="row" style="margin-top:8px">
+            <input class="grow" type="url" name="url" placeholder="https://script.google.com/macros/s/…/exec" required>
+            <button class="btn primary" type="submit">Connect</button>
+          </form>
+        </li>
+      </ol>
+      <p class="small muted" style="margin-bottom:0">“Anyone” only means Google doesn’t ask for a login. The script ignores any request without your key, and the key stays on this phone.</p>
+    </div>`;
+}
+
+function pendingKey() {
+  if (!state.gcal.key) {
+    const bytes = crypto.getRandomValues(new Uint8Array(24));
+    state.gcal.key = Array.from(bytes, (b) => b.toString(16).padStart(2, '0')).join('');
+    // Not connected until a URL works; the key is kept so the copied script stays valid.
+    save();
+  }
+  return state.gcal.key;
+}
+
+function wireGcalSetup(view) {
+  const copyBtn = $('#gcal-copy', view);
+  if (!copyBtn) return;
+  const key = pendingKey();
+  const scriptReady = (gcalScript ? Promise.resolve(gcalScript) : fetch('google-calendar/Code.gs').then((r) => {
+    if (!r.ok) throw new Error();
+    return r.text();
+  }).then((txt) => (gcalScript = txt))).then((txt) => txt.replace('__STEADY_KEY__', key));
+
+  // Clipboard writes on iOS must happen inside the tap, so the text is fetched ahead of time.
+  let scriptText = null;
+  scriptReady.then((txt) => { scriptText = txt; }).catch(() => {});
+
+  copyBtn.addEventListener('click', async () => {
+    if (!scriptText) { toast('Still loading the script. Try again in a second.'); return; }
+    try {
+      await navigator.clipboard.writeText(scriptText);
+      toast('Script copied');
+    } catch {
+      toast('Couldn’t copy. Use “Send to myself” instead.');
+    }
+  });
+
+  $('#gcal-share', view).addEventListener('click', async () => {
+    if (!scriptText) { toast('Still loading the script. Try again in a second.'); return; }
+    if (navigator.share) {
+      try { await navigator.share({ title: 'Steady calendar script', text: scriptText }); } catch { /* cancelled */ }
+    } else {
+      location.href = `mailto:?subject=${encodeURIComponent('Steady calendar script')}&body=${encodeURIComponent(scriptText)}`;
+    }
+  });
+
+  $('#gcal-form', view).addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const url = String(new FormData(e.target).get('url')).trim();
+    if (!/^https:\/\/script\.google(usercontent)?\.com\/.+/.test(url)) {
+      toast('That doesn’t look like a script.google.com Web app URL.');
+      return;
+    }
+    const btn = e.target.querySelector('button');
+    btn.disabled = true;
+    btn.textContent = 'Checking…';
+    try {
+      const { calendar } = await gcalRequest({ action: 'ping' }, { url, key });
+      state.gcal = { ...state.gcal, url, calendar, error: '', lastSync: 0 };
+      save();
+      toast('Google Calendar connected');
+      await gcalSync(true);
+    } catch (err) {
+      toast(err.message);
+      btn.disabled = false;
+      btn.textContent = 'Connect';
+    }
+  });
 }
 
 /* ---------- Focus ---------- */
@@ -818,9 +1070,11 @@ document.addEventListener('visibilitychange', () => {
   tick();
   if (state.timer?.endsAt) requestWake();
   render();
+  gcalSync();
 });
 
 render();
+gcalSync();
 tickHandle = setInterval(tick, 500);
 
 if ('serviceWorker' in navigator && location.protocol === 'https:') {

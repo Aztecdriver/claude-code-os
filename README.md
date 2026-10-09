@@ -4,7 +4,7 @@ A small iPhone web app for keeping screen time and your day in check. Add it to 
 
 It has four tabs:
 
-- **Today**: one intention for the day, a time-blocked plan (the block you're in shows at the top of every screen), and a short task list.
+- **Today**: one intention for the day, a time-blocked plan (the block you're in shows at the top of every screen), and a short task list. Connect Google Calendar and your events appear in the plan, and your blocks can be sent back to Google.
 - **Focus**: a Pomodoro timer (25/5 by default) that starts from any task, logs your sessions and keeps a daily streak. It keeps the screen awake while it runs.
 - **Limits**: a checklist that sets up Apple's Screen Time so you can't quietly switch it off, plus a daily budget for total screen time and for each app you name.
 - **Review**: a two-minute evening check-in. Copy your numbers from Screen Time, rate the day and pick one change for tomorrow (that change becomes tomorrow's intention). It also shows 7-day charts of screen time against your goal and of time spent focused.
@@ -15,9 +15,17 @@ iOS doesn't let a web app see or block other apps. Only Screen Time can, and the
 
 Data lives only on your phone, in the app's local storage. Use **Review → Export backup** now and then.
 
+## Google Calendar
+
+A web app can't sign in to Google by itself, so Steady talks to a small Apps Script (`google-calendar/Code.gs`) that runs in your own Google account. The script can list today's events from your visible calendars, skipping ones you've declined. It can also create and delete events in your default calendar.
+
+Set it up from the **Google Calendar** card at the bottom of the Today tab. Steady generates a random key and gives you a copy of the script with that key built in. Deploy the script as a web app (Execute as: Me, Who has access: Anyone), then paste the URL back into Steady. The script refuses any request that doesn't carry the key, and the key never leaves your phone. To revoke access, archive the deployment in Apps Script or remove the project's access at myaccount.google.com/permissions.
+
+Steady syncs when you open it, at most every five minutes, and whenever you tap **Sync**.
+
 ## Getting it on your phone
 
-The app is static files (`index.html`, `app.css`, `app.js`, `sw.js`, `manifest.webmanifest`, `icons/`) with no build step. It needs to be served over HTTPS.
+The app is static files (`index.html`, `app.css`, `app.js`, `sw.js`, `manifest.webmanifest`, `icons/`, `google-calendar/`) with no build step. It needs to be served over HTTPS.
 
 **GitHub Pages** (the workflow is already in `.github/workflows/pages.yml`):
 
