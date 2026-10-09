@@ -1,0 +1,5 @@
+# Machine-local Claude Code settings
+.claude/settings.local.json
+
+# Separate repository with its own remote
+claude-code-first-pr/
