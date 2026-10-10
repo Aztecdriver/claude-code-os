@@ -1,5 +1,5 @@
 # Locks the LR60 Trainer with a passphrase so it can sit on a public web address.
-# It encrypts lr60-trainer\index.html into lr60-trainer\site\app.enc.json.
+# It encrypts lr60-trainer\index.html into icons\lr60\app.enc.json.
 # Only the encrypted file is published; the page asks for the passphrase and decrypts it on the phone.
 #
 # Run it from a normal PowerShell window:   powershell -ExecutionPolicy Bypass -File lock.ps1
