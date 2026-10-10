@@ -3,3 +3,7 @@
 
 # Separate repository with its own remote
 claude-code-first-pr/
+
+# LR60 Trainer: only the locked copy in icons/lr60 is published
+lr60-trainer/index.html
+lr60-trainer/LR60-Trainer.html

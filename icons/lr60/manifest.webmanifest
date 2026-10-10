@@ -1,0 +1,14 @@
+{
+  "name": "LR60 Trainer",
+  "short_name": "LR60",
+  "description": "Learjet 60 initial training: schedule, drills, FMS practice unit and cockpit trainer.",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "background_color": "#0d1318",
+  "theme_color": "#0d1318",
+  "icons": [
+    { "src": "icon-180.png", "sizes": "180x180", "type": "image/png" },
+    { "src": "icon-512.png", "sizes": "512x512", "type": "image/png" }
+  ]
+}
