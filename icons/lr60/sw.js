@@ -1,5 +1,5 @@
 // Bump CACHE when shipping changes so phones pick up the new files.
-const CACHE = 'lr60-v6';
+const CACHE = 'lr60-v7';
 const FONTS = 'https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@500;600;700&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap';
 const SHELL = ['./', 'index.html', 'app.enc.json', 'manifest.webmanifest', 'icon-180.png', 'icon-512.png'];
 
@@ -26,8 +26,12 @@ self.addEventListener('fetch', (e) => {
   e.respondWith(
     fetch(e.request)
       .then((res) => {
-        const copy = res.clone();
-        caches.open(CACHE).then((c) => c.put(e.request, copy));
+        // Keep error pages out of the cache so a bad response never replaces a good offline copy.
+        // Cross-origin font files come back opaque (status 0), so those are kept too.
+        if (res.ok || res.type === 'opaque') {
+          const copy = res.clone();
+          caches.open(CACHE).then((c) => c.put(e.request, copy));
+        }
         return res;
       })
       .catch(() => caches.match(e.request).then((hit) => hit || (e.request.mode === 'navigate' ? caches.match('index.html') : Response.error())))
