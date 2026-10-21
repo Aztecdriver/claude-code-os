@@ -36,3 +36,7 @@ python3 -m http.server 8000
 ```
 
 Then open http://localhost:8000. When you ship changes, bump `CACHE` in `sw.js` so installed copies pick them up.
+
+## The LR60 Trainer
+
+`icons/lr60/` holds a second, passphrase-locked app on the same site. Only the encrypted `app.enc.json` is public; `lr60-trainer/pwa/lock.ps1` and `unlock.ps1` encrypt and decrypt it. Both apps share one origin and so one set of browser caches, so each service worker must only delete caches with its own prefix (`steady-` or `lr60-`).
